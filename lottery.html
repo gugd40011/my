@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎰 幸运抽奖</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/tronweb@5.3.1/dist/TronWeb.js"></script>
+  <style>
+    body {
+      background: linear-gradient(to right, #FC466B, #3F5EFB);
+      color: #fff;
+      min-height: 100vh;
+    }
+    .card {
+      background: rgba(255,255,255,0.95);
+      border-radius: 20px;
+      padding: 2rem;
+      color: #333;
+    }
+    .highlight {
+      font-size: 1.8rem;
+      font-weight: bold;
+      color: #4CAF50;
+    }
+    .ended-yes { color: green; font-weight: bold; }
+    .ended-no { color: red; font-weight: bold; }
+    #loadingOverlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      color: white;
+      font-size: 1.5rem;
+    }
+    .table th, .table td { vertical-align: middle; }
+  </style>
+</head>
+<body>
+<div id="loadingOverlay">连接钱包中...</div>
+<div class="container mt-5">
+  <div class="card text-center">
+    <h2>🎰 幸运抽奖</h2>
+    <p>每轮满 100 USDT 或 24 小时自动开奖</p>
+
+    <div class="mb-3">
+      <strong>当前轮次:</strong> <span id="roundId">--</span><br>
+      <strong>奖池总额:</strong> <span class="highlight" id="totalAmount">--</span> USDT<br>
+      <strong>你的投注:</strong> <span id="userTickets">0</span> USDT<br>
+      <strong>剩余时间:</strong> <span id="remaining">--:--:--</span><br>
+      <strong>是否已开奖:</strong> <span id="isEnded" class="ended-no">--</span><br>
+      <strong>参与人数:</strong> <span id="participantCount">--</span>
+    </div>
+
+    <div class="input-group mb-3">
+      <input type="number" id="ticketAmount" class="form-control" placeholder="投注金额，最少20 USDT" min="20">
+      <button class="btn btn-primary" id="buyBtn">立即投注</button>
+    </div>
+
+    <div>
+      <a href="index.html" class="btn btn-outline-light me-2">🎁 回首页</a>
+      <button class="btn btn-outline-warning me-2" onclick="showAgentRegister()">💼 注册代理</button>
+      <button class="btn btn-outline-success" onclick="showUserCenter()">👤 个人中心</button>
+      <button class="btn btn-outline-danger" onclick="reconnectWallet()" style="display: none;" id="reconnectBtn">🔄 重新连接钱包</button>
+    </div>
+  </div>
+
+  <div id="userInfo" class="card mt-4" style="display: none;">
+    <h3>👤 个人中心</h3>
+    <div id="userInfoContent"></div>
+  </div>
+
+  <div id="agentRegister" class="card mt-4" style="display: none;">
+    <h3>💼 注册代理</h3>
+    <div class="mb-3">
+      <label class="form-label">代理等级</label>
+      <select id="agentLevel" class="form-select">
+        <option value="1">1级 (1000 USDT)</option>
+        <option value="2">2级 (3000 USDT)</option>
+        <option value="3">3级 (5000 USDT)</option>
+      </select>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">上线地址（可选）</label>
+      <input id="uplineAddress" type="text" class="form-control" placeholder="输入TRON地址或留空">
+    </div>
+    <button class="btn btn-primary" onclick="registerAgent()">确认注册</button>
+    <div id="agentRegisterStatus" class="mt-2"></div>
+  </div>
+</div>
+
+<script>
+  const CONTRACT_ADDRESS = 'TU83e2AUfMkuYXMMKKGx7qRzYa95DQPQfz';
+  const USDT_ADDRESS = 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf';
+  const DOMAIN = 'https://h3.8123123.xyz';
+
+  const ABI = [
+    {
+      "inputs":[{"name":"user","type":"address"}],
+      "name":"getUserInfo",
+      "outputs":[{"components":[
+        {"name":"isAgent","type":"bool"},
+        {"name":"upline","type":"address"},
+        {"name":"level","type":"uint256"},
+        {"name":"subordinateCount","type":"uint256"},
+        {"name":"totalEarnings","type":"uint256"},
+        {"components":[{"name":"roundId","type":"uint256"},{"name":"amount","type":"uint256"},{"name":"timestamp","type":"uint256"}],"name":"bets","type":"tuple[]"}
+      ],"name":"","type":"tuple"}],
+      "stateMutability":"view","type":"function"
+    },
+    {
+      "inputs":[],"name":"getShareLink",
+      "outputs":[{"name":"","type":"string"}],
+      "stateMutability":"view","type":"function"
+    },
+    {
+      "inputs":[{"name":"startIndex","type":"uint256"},{"name":"count","type":"uint256"}],
+      "name":"getRoundHistory",
+      "outputs":[{"components":[
+        {"name":"roundId","type":"uint256"},
+        {"name":"totalAmount","type":"uint256"},
+        {"name":"firstPrize","type":"address"},
+        {"name":"firstAmount","type":"uint256"},
+        {"name":"secondPrize","type":"address[]"},
+        {"name":"secondAmount","type":"uint256"},
+        {"name":"timestamp","type":"uint256"}
+      ],"name":"","type":"tuple[]"}],
+      "stateMutability":"view","type":"function"
+    },
+    {
+      "inputs":[{"name":"upline","type":"address"},{"name":"level","type":"uint256"}],
+      "name":"registerAsAgent",
+      "outputs":[],"stateMutability":"nonpayable","type":"function"
+    },
+    {
+      "inputs":[{"name":"account","type":"address"}],
+      "name":"getAgentSubCount",
+      "outputs":[{"name":"","type":"uint256"}],
+      "stateMutability":"view","type":"function"
+    },
+    {
+      "inputs":[],"name":"getCurrentRound",
+      "outputs":[
+        {"name":"roundId","type":"uint256"},
+        {"name":"totalAmount","type":"uint256"},
+        {"name":"startTime","type":"uint256"},
+        {"name":"isEnded","type":"bool"},
+        {"name":"remainingTime","type":"uint256"},
+        {"name":"userTickets","type":"uint256"}
+      ],
+      "stateMutability":"view","type":"function"
+    },
+    {
+      "inputs":[],"name":"getParticipantCount",
+      "outputs":[{"name":"","type":"uint256"}],
+      "stateMutability":"view","type":"function"
+    },
+    {
+      "inputs":[{"name":"amount","type":"uint256"}],
+      "name":"buyTicket",
+      "outputs":[],"stateMutability":"nonpayable","type":"function"
+    },
+    {
+      "inputs":[{"name":"user","type":"address"}],
+      "name":"getRewardDetails",
+      "outputs":[
+        {"name":"reward","type":"uint256"},
+        {"name":"commission","type":"uint256"}
+      ],
+      "stateMutability":"view","type":"function"
+    }
+  ];
+
+  const USDT_ABI = [
+    {
+      "inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],
+      "name":"approve",
+      "outputs":[{"name":"","type":"bool"}],
+      "stateMutability":"nonpayable","type":"function"
+    },
+    {
+      "inputs":[{"name":"account","type":"address"}],
+      "name":"balanceOf",
+      "outputs":[{"name":"","type":"uint256"}],
+      "stateMutability":"view","type":"function"
+    },
+    {
+      "inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],
+      "name":"allowance",
+      "outputs":[{"name":"","type":"uint256"}],
+      "stateMutability":"view","type":"function"
+    }
+  ];
+
+  let tronWeb, contract;
+
+  async function initTronWeb() {
+    try {
+      document.getElementById('loadingOverlay').style.display = 'flex';
+
+      await window.tronLink.request({ method: 'tron_requestAccounts' });
+
+      tronWeb = window.tronWeb;
+      if (!tronWeb || !tronWeb.ready) {
+        throw new Error("钱包未连接，请登录 TronLink 并切换至 Nile 测试网");
+      }
+
+      tronWeb.setFullNode('https://nile.trongrid.io');
+      tronWeb.setEventServer('https://nile.trongrid.io');
+      contract = await tronWeb.contract(ABI, CONTRACT_ADDRESS);
+
+      if (!tronWeb.defaultAddress.base58) {
+        throw new Error("未检测到钱包地址，请重新登录 TronLink");
+      }
+
+      console.log("TronWeb 初始化成功，地址:", tronWeb.defaultAddress.base58);
+      document.getElementById('reconnectBtn').style.display = 'none';
+      return true;
+    } catch (e) {
+      console.error("初始化失败:", e);
+      let errorMsg = e.message || e;
+      if (!window.tronLink) {
+        errorMsg = "未安装 TronLink，请访问 https://www.tronlink.org 安装";
+      } else if (!window.tronWeb) {
+        errorMsg = "TronLink 未加载，请刷新页面或重启浏览器";
+      }
+      alert(`连接钱包失败：${errorMsg}\n\n建议：\n1. 安装/登录 TronLink\n2. 切换至 Nile 测试网\n3. 刷新页面`);
+      document.getElementById('reconnectBtn').style.display = 'inline-block';
+      return false;
+    } finally {
+      document.getElementById('loadingOverlay').style.display = 'none';
+    }
+  }
+
+  async function reconnectWallet() {
+    document.getElementById('loadingOverlay').style.display = 'flex';
+    const success = await initTronWeb();
+    if (success) {
+      alert("钱包连接成功！");
+      debouncedUpdateRoundInfo();
+    }
+  }
+
+  async function updateRoundInfo() {
+    try {
+      if (!tronWeb || !tronWeb.ready) return;
+      const info = await contract.getCurrentRound().call();
+      const count = await contract.getParticipantCount().call();
+
+      const elements = {
+        roundId: document.getElementById('roundId'),
+        totalAmount: document.getElementById('totalAmount'),
+        userTickets: document.getElementById('userTickets'),
+        remaining: document.getElementById('remaining'),
+        isEnded: document.getElementById('isEnded'),
+        participantCount: document.getElementById('participantCount')
+      };
+      for (const [key, el] of Object.entries(elements)) {
+        if (!el) {
+          console.error(`DOM 元素缺失: ${key}`);
+          return;
+        }
+      }
+
+      elements.roundId.innerText = Number(info.roundId);
+      elements.totalAmount.innerText = (Number(info.totalAmount) / 1e6).toFixed(2);
+      elements.userTickets.innerText = (Number(info.userTickets) / 1e6).toFixed(2);
+      elements.participantCount.innerText = Number(count);
+
+      const remain = Number(info.remainingTime);
+      const h = String(Math.floor(remain / 3600)).padStart(2, '0');
+      const m = String(Math.floor((remain % 3600) / 60)).padStart(2, '0');
+      const s = String(remain % 60).padStart(2, '0');
+      elements.remaining.innerText = `${h}:${m}:${s}`;
+
+      const ended = info.isEnded;
+      elements.isEnded.innerText = ended ? '✅ 已开奖' : '⏳ 未开奖';
+      elements.isEnded.className = ended ? 'ended-yes' : 'ended-no';
+    } catch (e) {
+      console.error("更新轮次失败:", e);
+    }
+  }
+
+  let lastUpdate = 0;
+  async function debouncedUpdateRoundInfo() {
+    const now = Date.now();
+    if (now - lastUpdate < 15000) return;
+    lastUpdate = now;
+    await updateRoundInfo();
+  }
+
+  document.getElementById('buyBtn').onclick = async () => {
+    if (!tronWeb || !tronWeb.ready) {
+      alert("请先连接钱包");
+      document.getElementById('reconnectBtn').style.display = 'inline-block';
+      return;
+    }
+    const amount = document.getElementById('ticketAmount').value;
+    if (!amount || amount < 20) return alert("最少投注 20 USDT");
+
+    document.getElementById('loadingOverlay').style.display = 'flex';
+    try {
+      // 检查轮次状态
+      const roundInfo = await contract.getCurrentRound().call();
+      if (roundInfo.isEnded) {
+        throw new Error("当前轮次已结束，请等待下一轮");
+      }
+      if (Number(roundInfo.totalAmount) < 20 * 1e6) {
+        console.warn("奖池不足 20 USDT，可能无法触发开奖");
+        alert("奖池不足 20 USDT，投注可能不触发开奖，继续？");
+      }
+      console.log("轮次状态:", roundInfo);
+
+      // 检查能量
+      const energyNeeded = Number(roundInfo.totalAmount) >= 100 * 1e6 ? 150000 : 50000;
+      const response = await fetch(`https://nile.trongrid.io/wallet/getaccountresource?address=${tronWeb.defaultAddress.hex}`);
+      const data = await response.json();
+      const energyAvailable = data.EnergyLimit - (data.EnergyUsed || 0);
+      if (energyAvailable < energyNeeded) {
+        throw new Error(`能量不足，当前: ${energyAvailable}，需: ${energyNeeded}，请质押 TRX（访问 https://nile.tronscan.org/#/wallet）`);
+      }
+      console.log("能量检查通过，当前:", energyAvailable, "需:", energyNeeded);
+
+      // 检查 USDT 余额和授权
+      const usdt = await tronWeb.contract(USDT_ABI, USDT_ADDRESS);
+      const amountInSun = parseInt(amount * 1e6);
+      const balance = await usdt.balanceOf(tronWeb.defaultAddress.hex).call();
+      if (parseInt(balance) < amountInSun) throw new Error(`USDT 余额不足，当前: ${(parseInt(balance) / 1e6).toFixed(2)} USDT，需: ${amount} USDT`);
+      const allowance = await usdt.allowance(tronWeb.defaultAddress.hex, CONTRACT_ADDRESS).call();
+      if (parseInt(allowance) < amountInSun) {
+        console.log("授权不足，重新授权:", amountInSun / 1e6, "USDT");
+        await usdt.approve(CONTRACT_ADDRESS, amountInSun).send({ feeLimit: 20000000 });
+        console.log("USDT 授权成功");
+      } else {
+        console.log("已有足够授权:", parseInt(allowance) / 1e6, "USDT");
+      }
+
+      // 执行投注
+      await contract.buyTicket(amountInSun).send({ feeLimit: 50000000 });
+      console.log("buyTicket 成功，金额:", amountInSun / 1e6, "USDT");
+
+      alert("投注成功！等待开奖！");
+      document.getElementById('ticketAmount').value = '';
+      debouncedUpdateRoundInfo();
+    } catch (err) {
+      let errorMsg = err.message || err;
+      if (err.includes("OUT_OF_ENERGY")) {
+        errorMsg = "能量不足，请质押 TRX（访问 https://nile.tronscan.org/#/wallet）";
+      } else if (err.includes("REVERT")) {
+        errorMsg = "合约执行失败，可能原因：USDT 余额不足、授权失败、轮次已结束或奖池不足";
+      } else if (err === "Confirmation declined by user") {
+        errorMsg = "请在 TronLink 确认交易";
+      }
+      console.error("buyTicket 失败详情:", err);
+      alert(`投注失败: ${errorMsg}\n交易哈希: ${err.transactionHash || '未知'}`);
+    } finally {
+      document.getElementById('loadingOverlay').style.display = 'none';
+    }
+  };
+
+  async function showUserCenter() {
+    if (!tronWeb || !tronWeb.ready) {
+      alert("请先连接钱包");
+      document.getElementById('reconnectBtn').style.display = 'inline-block';
+      return;
+    }
+    const userInfoDiv = document.getElementById('userInfo');
+    const contentDiv = document.getElementById('userInfoContent');
+    userInfoDiv.style.display = 'block';
+    contentDiv.innerHTML = '<p class="text-muted">加载中...</p>';
+    document.getElementById('loadingOverlay').style.display = 'flex';
+
+    try {
+      const userAddress = tronWeb.defaultAddress.base58;
+      let userInfo, shareLink, history, rewardDetails;
+
+      try {
+        userInfo = await contract.getUserInfo(userAddress).call();
+        console.log("getUserInfo 原始数据:", userInfo);
+      } catch (e) {
+        console.error("getUserInfo 失败:", e);
+        throw new Error(`getUserInfo 失败: ${e.message || e}`);
+      }
+
+      try {
+        rewardDetails = await contract.getRewardDetails(userAddress).call();
+        console.log("getRewardDetails 原始数据:", rewardDetails);
+      } catch (e) {
+        console.error("getRewardDetails 失败:", e);
+        rewardDetails = { reward: 0, commission: 0 };
+      }
+
+      if (!userInfo.isAgent) {
+        shareLink = `<span class="text-warning">请注册代理以获取分享链接</span><br><button class="btn btn-warning mt-2" onclick="showAgentRegister()">立即注册代理</button>`;
+      } else {
+        shareLink = `<span class="text-info">分享链接：${DOMAIN}/agent.html?ref=${userAddress}</span>`;
+      }
+
+      try {
+        history = await contract.getRoundHistory(0, 5).call();
+        console.log("getRoundHistory 原始数据:", history);
+      } catch (e) {
+        console.error("getRoundHistory 失败:", e);
+        history = [];
+      }
+
+      if (!userInfo) {
+        contentDiv.innerHTML = `<div class="alert alert-danger">加载失败：用户信息不可用，请检查网络或稍后重试</div>`;
+        return;
+      }
+
+      const level = Number(userInfo.level) || 0;
+      const levelDisplay = (level >= 1 && level <= 3) ? level : '<span class="text-warning">异常，请重新注册</span>';
+      const uplineAddress = userInfo.upline === "0x0000000000000000000000000000000000000000" ? "无" : (tronWeb.address.fromHex(userInfo.upline) || '<span class="text-warning">地址异常</span>');
+      const totalEarnings = Number(userInfo.totalEarnings) / 1e6;
+      const earningsDisplay = totalEarnings > 0 ? `${totalEarnings.toFixed(2)} USDT` : '<span class="text-info">暂无收益，邀请下线或投注</span>';
+      const subordinateList = userInfo.subordinateCount > 0 ? `人数：${userInfo.subordinateCount}，请联系支持获取详情<span class="text-warning">（可能存在异常数据）</span>` : "无";
+      const rewardDetailsDisplay = `彩票奖励：${(Number(rewardDetails.reward) / 1e6).toFixed(2)} USDT<br>代理佣金：${(Number(rewardDetails.commission) / 1e6).toFixed(2)} USDT`;
+
+      contentDiv.innerHTML = `
+        <h4>基本信息</h4>
+        <p><strong>是否为代理:</strong> ${userInfo.isAgent ? "是" : "否"}</p>
+        <p><strong>上线代理:</strong> ${uplineAddress}</p>
+        <p><strong>代理等级:</strong> ${levelDisplay}</p>
+        <p><strong>下线人数:</strong> ${subordinateList}</p>
+        <p><strong>总收益:</strong> ${earningsDisplay}</p>
+        <p><strong>奖励详情:</strong><br>${rewardDetailsDisplay}</p>
+        <p><strong>分享链接:</strong> ${shareLink}</p>
+        <h4 class="mt-4">投注记录</h4>
+        <table class="table table-striped">
+          <thead>
+            <tr><th>轮次</th><th>金额 (USDT)</th><th>时间</th></tr>
+          </thead>
+          <tbody>
+            ${userInfo.bets && userInfo.bets.length ? userInfo.bets.map(bet => `
+              <tr>
+                <td>${Number(bet.roundId)}</td>
+                <td>${(Number(bet.amount) / 1e6).toFixed(2)}</td>
+                <td>${new Date(Number(bet.timestamp) * 1000).toLocaleString()}</td>
+              </tr>
+            `).join("") : '<tr><td colspan="3" class="text-center">暂无记录</td></tr>'}
+          </tbody>
+        </table>
+        <h4 class="mt-4">开奖历史</h4>
+        <table class="table table-striped">
+          <thead>
+            <tr><th>轮次</th><th>奖池 (USDT)</th><th>一等奖</th><th>金额</th><th>二等奖</th><th>金额/人</th><th>时间</th></tr>
+          </thead>
+          <tbody>
+            ${history && history.length ? history.map(round => `
+              <tr>
+                <td>${Number(round.roundId)}</td>
+                <td>${(Number(round.totalAmount) / 1e6).toFixed(2)}</td>
+                <td>${tronWeb.address.fromHex(round.firstPrize)}</td>
+                <td>${(Number(round.firstAmount) / 1e6).toFixed(2)}</td>
+                <td>${round.secondPrize.length > 0 ? round.secondPrize.map(addr => tronWeb.address.fromHex(addr)).join(", ") : "无"}</td>
+                <td>${Number(round.secondAmount) > 0 ? (Number(round.secondAmount) / 1e6).toFixed(2) : '<span class="text-warning">0.00</span>'}</td>
+                <td>${new Date(Number(round.timestamp) * 1000).toLocaleString()}</td>
+              </tr>
+            `).join("") : '<tr><td colspan="7" class="text-center">暂无记录</td></tr>'}
+          </tbody>
+        </table>
+      `;
+    } catch (err) {
+      console.error("个人中心加载失败:", err);
+      contentDiv.innerHTML = `<div class="alert alert-danger">加载失败：请检查网络或稍后重试（${err.message || err}）</div>`;
+    } finally {
+      document.getElementById('loadingOverlay').style.display = 'none';
+    }
+  }
+
+  async function showAgentRegister() {
+    if (!tronWeb || !tronWeb.ready) {
+      alert("请先连接钱包");
+      document.getElementById('reconnectBtn').style.display = 'inline-block';
+      return;
+    }
+    document.getElementById('agentRegister').style.display = 'block';
+    document.getElementById('agentRegisterStatus').innerHTML = '';
+  }
+
+  async function registerAgent() {
+    if (!tronWeb || !tronWeb.ready) {
+      alert("请先连接钱包");
+      document.getElementById('reconnectBtn').style.display = 'inline-block';
+      return;
+    }
+    const statusDiv = document.getElementById('agentRegisterStatus');
+    statusDiv.innerHTML = '';
+    document.getElementById('loadingOverlay').style.display = 'flex';
+
+    try {
+      const usdt = await tronWeb.contract(USDT_ABI, USDT_ADDRESS);
+      const level = document.getElementById('agentLevel').value;
+      const uplineInput = document.getElementById('uplineAddress').value.trim();
+      let upline = "0x0000000000000000000000000000000000000000";
+      if (uplineInput && !uplineInput.match(/^T[1-9A-HJ-NP-Za-km-z]{33}$/)) {
+        throw new Error("请输入有效的 TRON 地址（以 T 开头，34 位）或留空");
+      }
+      if (uplineInput) upline = uplineInput;
+
+      const fee = level == 1 ? 1000 * 1e6 : level == 2 ? 3000 * 1e6 : 5000 * 1e6;
+      const balance = await usdt.balanceOf(tronWeb.defaultAddress.hex).call();
+      if (parseInt(balance) < fee) throw new Error("USDT 余额不足");
+
+      await usdt.approve(CONTRACT_ADDRESS, fee).send({ feeLimit: 20000000 });
+      await contract.registerAsAgent(upline, level).send({ feeLimit: 20000000 });
+
+      statusDiv.innerHTML = '<div class="alert alert-success">注册成功！</div>';
+      alert("代理注册成功，请返回个人中心查看分享链接");
+    } catch (err) {
+      console.error("代理注册失败:", err);
+      statusDiv.innerHTML = `<div class="alert alert-danger">注册失败：${err === "Confirmation declined by user" ? "请在 TronLink 确认交易" : err.message || err}</div>`;
+    } finally {
+      document.getElementById('loadingOverlay').style.display = 'none';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      setTimeout(async () => {
+        const success = await initTronWeb();
+        if (success) {
+          debouncedUpdateRoundInfo();
+          setInterval(debouncedUpdateRoundInfo, 1000);
+        }
+      }, 3000);
+    } catch (e) {
+      console.error("初始化失败:", e);
+      alert("页面初始化失败，请刷新页面或检查网络");
+    }
+  });
+</script>
+</body>
+</html>
