@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>💼 成为代理商</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/tronweb@4.4.0/dist/TronWeb.js"></script>
+  <style>
+    body {
+      background: linear-gradient(to right, #1a2a6c, #b21f1f, #fdbb2d);
+      min-height: 100vh;
+      color: #333;
+    }
+    .card {
+      background: rgba(255,255,255,0.95);
+      padding: 2rem;
+      border-radius: 15px;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+    }
+    .level-option {
+      border: 2px solid #ccc;
+      border-radius: 10px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      cursor: pointer;
+    }
+    .level-option.active {
+      border-color: #FF9800;
+      box-shadow: 0 0 10px rgba(255,152,0,0.5);
+    }
+    #loadingOverlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      color: white;
+      font-size: 1.5rem;
+    }
+  </style>
+</head>
+<body>
+<div id="loadingOverlay">处理中...</div>
+<div class="container mt-5">
+  <div class="card">
+    <h2 class="text-center mb-4">💼 成为代理商</h2>
+    <p class="text-center">选择代理等级并一键注册</p>
+
+    <div id="levels">
+      <div class="level-option" onclick="selectLevel(1)">
+        <strong>普通代理</strong> - 💎 1000 USDT
+      </div>
+      <div class="level-option" onclick="selectLevel(2)">
+        <strong>高级代理</strong> - 💎 3000 USDT
+      </div>
+      <div class="level-option" onclick="selectLevel(3)">
+        <strong>至尊代理</strong> - 💎 5000 USDT
+      </div>
+    </div>
+
+    <button class="btn btn-warning w-100 mt-3" id="registerBtn" disabled>🚀 注册为代理</button>
+
+    <div class="mt-4 d-none" id="refLinks">
+      <h5>🎯 你的推广链接：</h5>
+      <div class="mb-2">
+        空投页：<br><code id="link1"></code>
+      </div>
+      <div>
+        代理页：<br><code id="link2"></code>
+      </div>
+    </div>
+
+    <div class="text-center mt-4">
+      <a href="index.html" class="btn btn-outline-primary me-2">🎁 回首页</a>
+      <a href="lottery.html" class="btn btn-outline-success">🎰 去抽奖</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  const CONTRACT_ADDRESS = 'TU83e2AUfMkuYXMMKKGx7qRzYa95DQPQfz';
+  const USDT_ADDRESS = 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf';
+  let selectedLevel = 0;
+
+  const ABI = [
+    {"inputs":[{"name":"upline","type":"address"},{"name":"level","type":"uint256"}],"name":"registerAsAgent","outputs":[],"stateMutability":"nonpayable","type":"function"}
+  ];
+
+  const USDT_ABI = [
+    {"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
+  ];
+
+  function selectLevel(level) {
+    selectedLevel = level;
+    document.querySelectorAll('.level-option').forEach((el, i) => {
+      el.classList.toggle('active', i === level - 1);
+    });
+    document.getElementById('registerBtn').disabled = false;
+  }
+
+  document.getElementById('registerBtn').onclick = async () => {
+    if (!selectedLevel) return;
+    document.getElementById('loadingOverlay').style.display = 'flex';
+    try {
+      await window.tronLink.request({ method: 'tron_requestAccounts' });
+      const tronWeb = window.tronWeb;
+      if (!tronWeb || !tronWeb.ready) throw new Error("钱包未连接");
+
+      const ref = new URLSearchParams(window.location.search).get("ref") || "0x0000000000000000000000000000000000000000";
+      const fees = { 1: 1000000000, 2: 3000000000, 3: 5000000000 };
+
+      const usdt = await tronWeb.contract(USDT_ABI, USDT_ADDRESS);
+      const contract = await tronWeb.contract(ABI, CONTRACT_ADDRESS);
+
+      const balance = await usdt.balanceOf(tronWeb.defaultAddress.hex).call();
+      if (parseInt(balance) < fees[selectedLevel]) throw new Error("USDT 余额不足");
+
+      await usdt.approve(CONTRACT_ADDRESS, fees[selectedLevel]).send({ feeLimit: 100000000 });
+      await contract.registerAsAgent(ref, selectedLevel).send({ feeLimit: 100000000 });
+
+      const base = window.location.origin;
+      const myAddr = tronWeb.defaultAddress.base58;
+      document.getElementById('refLinks').classList.remove('d-none');
+      document.getElementById('link1').innerText = `${base}/index.html?ref=${myAddr}`;
+      document.getElementById('link2').innerText = `${base}/agent.html?ref=${myAddr}`;
+
+      alert("注册成功，推广链接已生成！");
+    } catch (err) {
+      alert("注册失败: " + err.message);
+    } finally {
+      document.getElementById('loadingOverlay').style.display = 'none';
+    }
+  };
+</script>
+</body>
+</html>
