@@ -162,8 +162,8 @@
             {
                 "constant": true,
                 "inputs": [],
-                "name": "name",
-                "outputs": [{"name": "", "type": "string"}],
+                "name": "paused",
+                "outputs": [{"name": "", "type": "bool"}],
                 "type": "function"
             }
         ];
@@ -184,7 +184,7 @@
                 window.ethereum.on('chainChanged', () => window.location.reload());
                 await connectWallet();
             } else {
-                alert('请安装 MetaMask，并禁用 TronLink、chext 等插件！建议使用干净浏览器，仅安装 MetaMask！');
+                alert('请安装 MetaMask，并禁用 TronLink、chext 等插件！');
             }
         }
 
@@ -205,7 +205,7 @@
                 document.getElementById('placeBet').addEventListener('click', placeBet);
             } catch (error) {
                 console.error('连接钱包失败:', error);
-                alert(`连接 MetaMask 失败: ${error.message}。请检查 MetaMask 或禁用 chext 等插件！`);
+                alert(`连接 MetaMask 失败: ${error.message}。请检查 MetaMask 或禁用插件！`);
             }
         }
 
@@ -252,18 +252,18 @@
                 const allowance = await usddt.methods.allowance(account, document.getElementById('crashAddress').value).call();
                 const minBetWei = await crash.methods.MIN_BET().call();
                 const maxBetWei = await crash.methods.MAX_BET().call();
-                let usddtName = 'USDDT';
+                let usddtPaused = '未知';
                 try {
-                    usddtName = await usddt.methods.name().call();
+                    usddtPaused = await usddt.methods.paused().call();
                 } catch (e) {
-                    console.warn('USDDT 合约无 name 函数');
+                    console.warn('USDDT 合约无 paused 函数');
                 }
                 let status = `钱包检查结果：\n`;
                 status += `账户地址: ${account}\n`;
                 status += `网络: ${chainId === 137 ? 'Polygon 主网' : '错误网络（需 Polygon 主网，链 ID 137）'}\n`;
                 status += `USDDT 余额: ${web3.utils.fromWei(usddtBalance, 'ether')} USDDT\n`;
                 status += `已授权给 Crash 合约: ${web3.utils.fromWei(allowance, 'ether')} USDDT\n`;
-                status += `USDDT 代币名称: ${usddtName}\n`;
+                status += `USDDT 暂停状态: ${usddtPaused}\n`;
                 status += `USDDT 地址: ${document.getElementById('usddtAddress').value}\n`;
                 status += `Crash 合约地址: ${document.getElementById('crashAddress').value}\n`;
                 status += `合约奖池: ${web3.utils.fromWei(contractBalance, 'ether')} USDDT\n`;
@@ -286,7 +286,7 @@
                 return;
             }
             try {
-                const usddმbalance = await usddt.methods.balanceOf(account).call();
+                const usddtBalance = await usddt.methods.balanceOf(account).call();
                 const contractBalance = await usddt.methods.balanceOf(document.getElementById('crashAddress').value).call();
                 const contractUsddt = await crash.methods.usddt().call();
                 const dividendPool = await crash.methods.dividendPool().call();
@@ -294,12 +294,6 @@
                 const allowance = await usddt.methods.allowance(account, document.getElementById('crashAddress').value).call();
                 const minBetWei = await crash.methods.MIN_BET().call();
                 const maxBetWei = await crash.methods.MAX_BET().call();
-                let usddtName = 'USDDT';
-                try {
-                    usddtName = await usddt.methods.name().call();
-                } catch (e) {
-                    console.warn('USDDT 合约无 name 函数');
-                }
                 document.getElementById('balance').textContent = `USDDT 余额: ${web3.utils.fromWei(usddtBalance, 'ether')} USDDT | 已授权: ${web3.utils.fromWei(allowance, 'ether')} USDDT`;
                 document.getElementById('contractInfo').textContent = `合约奖池: ${web3.utils.fromWei(contractBalance, 'ether')} USDDT | 最小下注: ${web3.utils.fromWei(minBetWei, 'ether')} USDDT | 最大下注: ${web3.utils.fromWei(maxBetWei, 'ether')} USDDT | 合约 USDDT: ${contractUsddt.substring(0, 6)}...${contractUsddt.substring(contractUsddt.length - 4)} | 分红池: ${dividendPool.substring(0, 6)}...${dividendPool.substring(dividendPool.length - 4)} | 拥有者: ${owner.substring(0, 6)}...${owner.substring(owner.length - 4)}`;
             } catch (error) {
@@ -341,24 +335,34 @@
                     document.getElementById('result').textContent = '';
                     return;
                 }
+                let usddtPaused = false;
+                try {
+                    usddtPaused = await usddt.methods.paused().call();
+                } catch (e) {
+                    console.warn('USDDT 合约无 paused 函数');
+                }
+                if (usddtPaused) {
+                    alert('USDDT 合约已暂停！请联系管理员（0xB0C096d0709eD134Ba3e179d1Fa1F1C32d62E878）解锁！');
+                    document.getElementById('result').textContent = '';
+                    return;
+                }
                 const allowance = await usddt.methods.allowance(account, document.getElementById('crashAddress').value).call();
                 console.log(`当前授权: ${web3.utils.fromWei(allowance, 'ether')} USDDT`);
                 if (parseFloat(web3.utils.fromWei(allowance, 'ether')) < parseFloat(betAmount)) {
-                    alert('即将清零旧授权并重新授权 USDDT 支出，请在 MetaMask 确认两次交易！建议 Gas Limit 设为 600,000，Gas Price 30-50 Gwei');
+                    alert('即将清零旧授权并重新授权 USDDT 支出，请在 MetaMask 确认两次交易！建议 Gas Limit 设为 500,000');
                     let clearTxHash = '';
                     try {
                         console.log(`尝试清零授权给 ${document.getElementById('crashAddress').value}`);
                         await usddt.methods.approve(document.getElementById('crashAddress').value, 0).call({ from: account });
                         const clearTx = await usddt.methods.approve(document.getElementById('crashAddress').value, 0).send({
                             from: account,
-                            gas: 600000,
-                            gasPrice: web3.utils.toWei('50', 'gwei')
+                            gas: 500000
                         });
                         clearTxHash = clearTx.transactionHash;
                         console.log(`清零授权成功，交易哈希: ${clearTxHash}`);
                     } catch (clearError) {
                         console.error('清零授权失败:', clearError);
-                        throw new Error(`清零授权失败: ${clearError.message}。交易哈希: ${clearTxHash || '未生成'}。请检查 USDDT 合约状态（是否锁仓、黑名单、权限）、Gas 设置或 RPC！`);
+                        throw new Error(`清零授权失败: ${clearError.message}。交易哈希: ${clearTxHash || '未生成'}。请检查 USDDT 合约状态或 Gas 设置！`);
                     }
                     let approveTxHash = '';
                     try {
@@ -366,19 +370,18 @@
                         await usddt.methods.approve(document.getElementById('crashAddress').value, betWei).call({ from: account });
                         const approveTx = await usddt.methods.approve(document.getElementById('crashAddress').value, betWei).send({
                             from: account,
-                            gas: 600000,
-                            gasPrice: web3.utils.toWei('50', 'gwei')
+                            gas: 500000
                         });
                         approveTxHash = approveTx.transactionHash;
                         console.log(`授权成功: ${betAmount} USDDT, 交易哈希: ${approveTxHash}`);
                     } catch (approveError) {
                         console.error('授权失败:', approveError);
-                        throw new Error(`授权 USDDT 失败: ${approveError.message}。交易哈希: ${approveTxHash || '未生成'}。请检查 USDDT 合约状态（是否锁仓、黑名单、权限）、Gas 设置或 RPC！`);
+                        throw new Error(`授权 USDDT 失败: ${approveError.message}。交易哈希: ${approveTxHash || '未生成'}。请检查 USDDT 合约状态（是否暂停、余额锁仓、权限）、Gas 设置或 RPC！`);
                     }
                 } else {
                     console.log('已有足够授权，跳过 approve');
                 }
-                alert('授权已足够，即将下注，请确认！建议 Gas Limit 设为 800,000，Gas Price 30-50 Gwei');
+                alert('授权已足够，即将下注，请确认！建议 Gas Limit 设为 700,000');
                 console.log(`尝试下注 ${betAmount} USDDT`);
                 try {
                     await crash.methods.placeBet(betWei).call({ from: account });
@@ -388,8 +391,7 @@
                 }
                 const tx = await crash.methods.placeBet(betWei).send({
                     from: account,
-                    gas: 800000,
-                    gasPrice: web3.utils.toWei('50', 'gwei')
+                    gas: 700000
                 });
                 console.log(`下注成功，交易哈希: ${tx.transactionHash}`);
                 crash.getPastEvents('BetPlaced', {
@@ -407,7 +409,7 @@
                 console.error('下注失败:', error);
                 let errorMsg = '下注失败：';
                 if (error.message.includes('revert')) {
-                    errorMsg += '合约调用失败，可能金额超出范围、USDDT 合约锁仓、黑名单或账户受限';
+                    errorMsg += '合约调用失败，可能金额超出范围、USDDT 合约暂停、余额锁仓或玩家受限';
                 } else if (error.message.includes('denied')) {
                     errorMsg += '用户拒绝交易，请确认 MetaMask 交易';
                 } else if (error.message.includes('invalid address')) {
@@ -415,7 +417,7 @@
                 } else if (error.message.includes('execution reverted')) {
                     errorMsg += '合约逻辑错误，可能授权不足、USDDT 状态受限或 Gas 不足';
                 } else if (error.message.includes('Internal JSON-RPC error')) {
-                    errorMsg += 'MetaMask 内部错误，可能 RPC 不稳定、Gas 不足或 USDDT 合约限制（锁仓、黑名单）';
+                    errorMsg += 'MetaMask 内部错误，可能 RPC 不稳定、Gas 不足或 USDDT 合约限制';
                 } else {
                     errorMsg += error.message;
                 }
